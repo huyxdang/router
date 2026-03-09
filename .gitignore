@@ -5,3 +5,5 @@ results/
 data/
 *.pkl
 .DS_Store
+
+.env 
