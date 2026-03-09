@@ -8,7 +8,7 @@ load_dotenv(Path(__file__).parent / ".env")
 # ============ API Keys ============
 TTC_API_KEY = os.environ.get("TTC_API_KEY", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-MISTRAL_API_KEY = os.environ.get("MISTRAL_API_KEY", "")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 
 # ============ Bear Compression ============
 BEAR_API_URL = "https://api.thetokencompany.com/v1/compress"
@@ -32,11 +32,11 @@ MODELS = [
         "cost_per_1m_output": 15.00,
     },
     {
-        "name": "mistral-large",
-        "id": "mistral-large-2512",
-        "provider": "mistral",
-        "cost_per_1m_input": 0.50,
-        "cost_per_1m_output": 1.50,
+        "name": "gpt-4o-mini",
+        "id": "gpt-4o-mini",
+        "provider": "openai",
+        "cost_per_1m_input": 0.15,
+        "cost_per_1m_output": 0.60,
     },
 ]
 

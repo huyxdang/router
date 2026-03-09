@@ -1,9 +1,9 @@
 import time
 
 import anthropic
-from mistralai import Mistral
+import openai
 
-from config import ANTHROPIC_API_KEY, MISTRAL_API_KEY
+from config import ANTHROPIC_API_KEY, OPENAI_API_KEY
 
 SYSTEM_PROMPT = (
     "You are a helpful assistant. Answer the question based on the provided context. "
@@ -11,7 +11,7 @@ SYSTEM_PROMPT = (
 )
 
 _anthropic_client = None
-_mistral_client = None
+_openai_client = None
 
 
 def _get_anthropic_client():
@@ -21,11 +21,11 @@ def _get_anthropic_client():
     return _anthropic_client
 
 
-def _get_mistral_client():
-    global _mistral_client
-    if _mistral_client is None:
-        _mistral_client = Mistral(api_key=MISTRAL_API_KEY)
-    return _mistral_client
+def _get_openai_client():
+    global _openai_client
+    if _openai_client is None:
+        _openai_client = openai.OpenAI(api_key=OPENAI_API_KEY)
+    return _openai_client
 
 
 def call_llm(model_config: dict, prompt_text: str) -> dict:
@@ -42,7 +42,8 @@ def call_llm(model_config: dict, prompt_text: str) -> dict:
         client = _get_anthropic_client()
         response = client.messages.create(
             model=model_id,
-            max_tokens=256,
+            max_tokens=100,
+            temperature=0,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": prompt_text}],
         )
@@ -54,15 +55,16 @@ def call_llm(model_config: dict, prompt_text: str) -> dict:
             "latency": latency,
         }
 
-    elif provider == "mistral":
-        client = _get_mistral_client()
-        response = client.chat.complete(
+    elif provider == "openai":
+        client = _get_openai_client()
+        response = client.chat.completions.create(
             model=model_id,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": prompt_text},
             ],
-            max_tokens=256,
+            max_tokens=100,
+            temperature=0,
         )
         latency = time.time() - start
         return {
