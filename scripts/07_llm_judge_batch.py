@@ -52,17 +52,45 @@ def load_ground_truths() -> dict:
     return gt_map
 
 
+def _merge_existing_judgments(df: pd.DataFrame) -> pd.DataFrame:
+    """Merge existing judgments from checkpoint/output into df."""
+    df["llm_judge"] = None
+    key_cols = ["prompt_id", "model_name", "aggressiveness"]
+    for path in [OUTPUT_PATH, os.path.join(RESULTS_DIR, "judge_checkpoint.parquet")]:
+        if os.path.exists(path):
+            existing = pd.read_parquet(path)
+            if "llm_judge" in existing.columns:
+                judged = existing[existing["llm_judge"].notna()][key_cols + ["llm_judge"]]
+                if not judged.empty:
+                    df = df.drop(columns=["llm_judge"]).merge(
+                        judged, on=key_cols, how="left",
+                    )
+                    n = df["llm_judge"].notna().sum()
+                    print(f"  Merged {n} existing judgments from {os.path.basename(path)}")
+                    break
+    return df
+
+
 def submit():
-    """Create JSONL input file and submit batch to OpenAI."""
+    """Create JSONL input file and submit batch to OpenAI (only unjudged rows)."""
     print("[1] Loading grid results...")
     df = pd.read_parquet(GRID_PATH)
     gt_map = load_ground_truths()
-    print(f"  {len(df)} records to judge")
+    print(f"  {len(df)} total records")
 
-    # Build JSONL
+    # Merge existing judgments so we only submit new rows
+    df = _merge_existing_judgments(df)
+    to_judge = df[df["llm_judge"].isna()]
+    print(f"  {len(to_judge)} records need judging")
+
+    if to_judge.empty:
+        print("  All records already judged!")
+        return
+
+    # Build JSONL (only unjudged rows)
     print("[2] Building batch input file...")
     with open(BATCH_INPUT_PATH, "w") as f:
-        for idx, row in df.iterrows():
+        for idx, row in to_judge.iterrows():
             ground_truth = gt_map.get(row["prompt_id"], "")
             response_text = str(row.get("llm_response", "") or "")
 
@@ -85,7 +113,7 @@ def submit():
             }
             f.write(json.dumps(request) + "\n")
 
-    print(f"  Written to {BATCH_INPUT_PATH}")
+    print(f"  Written {len(to_judge)} requests to {BATCH_INPUT_PATH}")
 
     # Upload file
     print("[3] Uploading to OpenAI...")
@@ -112,7 +140,8 @@ def submit():
     meta = {
         "batch_id": batch.id,
         "file_id": file_obj.id,
-        "n_records": len(df),
+        "n_records": len(to_judge),
+        "n_total": len(df),
         "submitted_at": time.time(),
     }
     with open(BATCH_META_PATH, "w") as f:
@@ -186,10 +215,18 @@ def download():
 
     print(f"  Parsed {len(verdicts)} verdicts")
 
-    # Merge with grid results
+    # Merge with grid results (preserve existing judgments + add new ones)
     print("[3] Merging with grid results...")
     df = pd.read_parquet(GRID_PATH)
-    df["llm_judge"] = df.index.map(lambda i: verdicts.get(i))
+    df = _merge_existing_judgments(df)
+
+    # Apply new verdicts from this batch
+    new_count = 0
+    for idx, verdict in verdicts.items():
+        if verdict is not None and idx < len(df):
+            df.at[idx, "llm_judge"] = verdict
+            new_count += 1
+    print(f"  Applied {new_count} new verdicts from batch")
 
     n_correct = (df["llm_judge"] == "correct").sum()
     n_incorrect = (df["llm_judge"] == "incorrect").sum()

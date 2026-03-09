@@ -16,7 +16,7 @@ from config import EMBEDDING_MODEL, N_CLUSTERS, AGGRESSIVENESS_LEVELS, MODELS
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 RESULTS_DIR = os.path.join(os.path.dirname(__file__), "..", "results")
-GRID_RESULTS_PATH = os.path.join(RESULTS_DIR, "grid_results.parquet")
+GRID_RESULTS_PATH = os.path.join(RESULTS_DIR, "grid_results_judged.parquet")
 ROUTER_PATH = os.path.join(RESULTS_DIR, "router.pkl")
 
 
@@ -74,10 +74,15 @@ def main():
 
     # Step 5: Compute per-cluster stats
     print("\n[5] Computing per-cluster statistics...")
+
+    # Add binary judge correctness column
+    df["llm_judge_correct"] = (df["llm_judge"] == "correct").astype(float)
+
     cluster_stats = df.groupby(["cluster_id", "model_name", "aggressiveness"]).agg(
         mean_f1=("f1_score", "mean"),
         mean_ca=("contains_answer", "mean"),
         mean_em=("correct", "mean"),
+        mean_judge=("llm_judge_correct", "mean"),
         mean_cost=("total_cost_usd", "mean"),
         mean_latency=("latency_seconds", "mean"),
         mean_compression_ratio=("compression_ratio", "mean"),
@@ -89,14 +94,14 @@ def main():
     print(f"  Expected: {N_CLUSTERS} × {len(MODELS)} × {len(AGGRESSIVENESS_LEVELS)} = "
           f"{N_CLUSTERS * len(MODELS) * len(AGGRESSIVENESS_LEVELS)}")
 
-    # Step 6: Quick sanity check — print best combo per cluster
-    print("\n[6] Best (model, agg) per cluster (by F1):")
+    # Step 6: Quick sanity check — print best combo per cluster (by judge accuracy)
+    print("\n[6] Best (model, agg) per cluster (by judge accuracy):")
     for cid in sorted(cluster_stats["cluster_id"].unique()):
         sub = cluster_stats[cluster_stats["cluster_id"] == cid]
-        best = sub.loc[sub["mean_f1"].idxmax()]
+        best = sub.loc[sub["mean_judge"].idxmax()]
         print(f"  Cluster {cid:2d} ({int(best['count']):2d} prompts): "
               f"{best['model_name']:<16s} agg={best['aggressiveness']:.1f}  "
-              f"F1={best['mean_f1']:.3f}  cost=${best['mean_cost']:.5f}")
+              f"judge={best['mean_judge']:.3f}  cost=${best['mean_cost']:.5f}")
 
     # Step 7: Save everything
     print("\n[7] Saving router artifacts...")

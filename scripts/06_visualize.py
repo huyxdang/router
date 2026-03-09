@@ -149,7 +149,7 @@ def plot_3_cost_vs_accuracy_scatter(df):
             )
             ax.annotate(
                 f"agg={agg}",
-                (sub["total_cost_usd"].mean(), sub["f1_score"].mean()),
+                (sub["total_cost_usd"].mean(), sub["llm_judge_correct"].mean()),
                 textcoords="offset points", xytext=(6, 3),
                 fontsize=7, alpha=0.7,
             )

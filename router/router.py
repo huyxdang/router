@@ -65,7 +65,7 @@ class Router:
 
         # 4. Score: minimize error + λ * cost
         metric = user_config.get("metric", "f1")
-        metric_col = {"f1": "mean_f1", "ca": "mean_ca", "em": "mean_em"}[metric]
+        metric_col = {"f1": "mean_f1", "ca": "mean_ca", "em": "mean_em", "judge": "mean_judge"}[metric]
         lam = user_config.get("lambda_", 1.0)
 
         candidates = candidates.copy()
@@ -126,7 +126,7 @@ class Router:
             return {"error": "No valid (model, aggressiveness) pair satisfies all constraints"}
 
         metric = user_config.get("metric", "f1")
-        metric_col = {"f1": "mean_f1", "ca": "mean_ca", "em": "mean_em"}[metric]
+        metric_col = {"f1": "mean_f1", "ca": "mean_ca", "em": "mean_em", "judge": "mean_judge"}[metric]
         lam = user_config.get("lambda_", 1.0)
 
         candidates = candidates.copy()
