@@ -46,7 +46,7 @@ PROMPTS_PER_BENCHMARK = 150
 
 # ============ Clustering ============
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"
-N_CLUSTERS = 20
+N_CLUSTERS = 5
 
 # ============ Helpers ============
 def get_model_by_name(name: str) -> dict:
