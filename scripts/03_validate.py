@@ -15,7 +15,7 @@ DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
 
 # Use a small subset for validation
 VALIDATION_PROMPTS = 2
-VALIDATION_AGG_LEVELS = [0.1, 0.7]
+VALIDATION_AGG_LEVELS = AGGRESSIVENESS_LEVELS
 
 
 def load_prompts(n: int) -> list[dict]:

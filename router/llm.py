@@ -10,8 +10,13 @@ SYSTEM_PROMPT = (
     "Be concise and give the answer directly."
 )
 
+# Sync clients
 _anthropic_client = None
 _openai_client = None
+
+# Async clients
+_async_anthropic_client = None
+_async_openai_client = None
 
 
 def _get_anthropic_client():
@@ -26,6 +31,20 @@ def _get_openai_client():
     if _openai_client is None:
         _openai_client = openai.OpenAI(api_key=OPENAI_API_KEY)
     return _openai_client
+
+
+def _get_async_anthropic_client():
+    global _async_anthropic_client
+    if _async_anthropic_client is None:
+        _async_anthropic_client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+    return _async_anthropic_client
+
+
+def _get_async_openai_client():
+    global _async_openai_client
+    if _async_openai_client is None:
+        _async_openai_client = openai.AsyncOpenAI(api_key=OPENAI_API_KEY)
+    return _async_openai_client
 
 
 def call_llm(model_config: dict, prompt_text: str) -> dict:
@@ -48,8 +67,9 @@ def call_llm(model_config: dict, prompt_text: str) -> dict:
             messages=[{"role": "user", "content": prompt_text}],
         )
         latency = time.time() - start
+        text = response.content[0].text if response.content else ""
         return {
-            "response_text": response.content[0].text,
+            "response_text": text,
             "input_tokens": response.usage.input_tokens,
             "output_tokens": response.usage.output_tokens,
             "latency": latency,
@@ -68,7 +88,54 @@ def call_llm(model_config: dict, prompt_text: str) -> dict:
         )
         latency = time.time() - start
         return {
-            "response_text": response.choices[0].message.content,
+            "response_text": response.choices[0].message.content or "",
+            "input_tokens": response.usage.prompt_tokens,
+            "output_tokens": response.usage.completion_tokens,
+            "latency": latency,
+        }
+
+    else:
+        raise ValueError(f"Unknown provider: {provider}")
+
+
+async def call_llm_async(model_config: dict, prompt_text: str) -> dict:
+    """Async version of call_llm."""
+    provider = model_config["provider"]
+    model_id = model_config["id"]
+
+    start = time.time()
+
+    if provider == "anthropic":
+        client = _get_async_anthropic_client()
+        response = await client.messages.create(
+            model=model_id,
+            max_tokens=100,
+            temperature=0,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": prompt_text}],
+        )
+        latency = time.time() - start
+        return {
+            "response_text": response.content[0].text if response.content else "",
+            "input_tokens": response.usage.input_tokens,
+            "output_tokens": response.usage.output_tokens,
+            "latency": latency,
+        }
+
+    elif provider == "openai":
+        client = _get_async_openai_client()
+        response = await client.chat.completions.create(
+            model=model_id,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": prompt_text},
+            ],
+            max_tokens=100,
+            temperature=0,
+        )
+        latency = time.time() - start
+        return {
+            "response_text": response.choices[0].message.content or "",
             "input_tokens": response.usage.prompt_tokens,
             "output_tokens": response.usage.completion_tokens,
             "latency": latency,

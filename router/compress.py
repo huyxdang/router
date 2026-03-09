@@ -10,12 +10,12 @@ def compress(text: str, aggressiveness: float) -> dict:
     compression_ratio, tokens_removed, removal_rate.
     """
     if aggressiveness == 0.0:
-        # No compression — estimate token count as words * 1.3
-        approx_tokens = int(len(text.split()) * 1.3)
+        # No compression — return original text as-is
+        # Real token counts come from the LLM API response, not here
         return {
             "compressed_text": text,
-            "original_input_tokens": approx_tokens,
-            "output_tokens": approx_tokens,
+            "original_input_tokens": 0,
+            "output_tokens": 0,
             "compression_ratio": 1.0,
             "tokens_removed": 0,
             "removal_rate": 0.0,

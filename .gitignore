@@ -1,9 +1,5 @@
 .env
 __pycache__/
 *.pyc
-results/
-data/
-*.pkl
 .DS_Store
-
-.env 
+results/

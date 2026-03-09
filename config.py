@@ -41,7 +41,7 @@ MODELS = [
 ]
 
 # ============ Grid Search ============
-AGGRESSIVENESS_LEVELS = [0.1, 0.4, 0.7, 1.0]
+AGGRESSIVENESS_LEVELS = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
 PROMPTS_PER_BENCHMARK = 150
 
 # ============ Clustering ============
