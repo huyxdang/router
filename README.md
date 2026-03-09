@@ -106,6 +106,9 @@ router/
 | Claude Haiku 4.5 | Anthropic | $1.00 / $5.00 | Mid-tier |
 | Claude Sonnet 4.6 | Anthropic | $3.00 / $15.00 | Quality ceiling |
 | GPT-4o-mini | OpenAI | $0.15 / $0.60 | Cost-efficient |
+| GPT-5.4 | OpenAI | $2.50 / $15.00 | Premium |
+| GPT-4.1-nano | OpenAI | $0.10 / $0.40 | Ultra-cheap |
+| GPT-4.1 | OpenAI | $2.00 / $8.00 | High-quality |
 
 ## Benchmarks
 

@@ -9,6 +9,7 @@ load_dotenv(Path(__file__).parent / ".env")
 TTC_API_KEY = os.environ.get("TTC_API_KEY", "")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY", "")
 
 # ============ Bear Compression ============
 BEAR_API_URL = "https://api.thetokencompany.com/v1/compress"
@@ -37,6 +38,27 @@ MODELS = [
         "provider": "openai",
         "cost_per_1m_input": 0.15,
         "cost_per_1m_output": 0.60,
+    },
+    {
+        "name": "gpt-5.4",
+        "id": "gpt-5.4",
+        "provider": "openai",
+        "cost_per_1m_input": 2.50,
+        "cost_per_1m_output": 15.00,
+    },
+    {
+        "name": "gpt-4.1-nano",
+        "id": "gpt-4.1-nano",
+        "provider": "openai",
+        "cost_per_1m_input": 0.10,
+        "cost_per_1m_output": 0.40,
+    },
+    {
+        "name": "gpt-4.1",
+        "id": "gpt-4.1",
+        "provider": "openai",
+        "cost_per_1m_input": 2.00,
+        "cost_per_1m_output": 8.00,
     },
 ]
 
