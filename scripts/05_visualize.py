@@ -29,7 +29,6 @@ COLORS = {
     "claude-sonnet": "#D4A054",
     "gpt-5.4": "#9B59B6",
     "router": "#2ECC71",
-    "router_cheap": "#27AE60",
 }
 
 MODEL_MARKERS = {
@@ -61,35 +60,21 @@ def plot_1_deferral_curve(df, evaluation):
 
     # Plot baseline points
     baselines = evaluation["baselines"]
-    # Deduce model name from baseline key: everything before the last _agg* segment
+    baseline_styles = {
+        "gpt54_only": {"color": COLORS["gpt-5.4"], "marker": MODEL_MARKERS["gpt-5.4"], "label": "gpt-5.4 only"},
+        "openrouter": {"color": "#E74C3C", "marker": "X", "label": "openrouter"},
+    }
     for name, result in baselines.items():
         if result["cost"] == 0 or result["count"] == 0:
             continue
-        # Key format: "{model_name}_agg{X}" — find model by matching known models
-        model = None
-        for m in sorted(COLORS.keys(), key=len, reverse=True):
-            if m == "router" or m == "router_cheap":
-                continue
-            # Check if the key starts with a sanitized version of the model name
-            if name.startswith(m.replace("-", "").replace(".", "")):
-                model = m
-                break
-        if model is None:
-            # Fallback: try to find model in the grid data
-            for m in df["model_name"].unique():
-                if m.replace("-", "").replace(".", "") in name:
-                    model = m
-                    break
-        if model is None:
-            continue
-
+        style = baseline_styles.get(name, {"color": "#95A5A6", "marker": "o", "label": name})
         ax.scatter(
             result["cost"], result["accuracy"],
-            c=_get_color(model), marker=_get_marker(model),
+            c=style["color"], marker=style["marker"],
             s=100, zorder=5, edgecolors="black", linewidths=0.5,
         )
         ax.annotate(
-            f"{name.replace('_', ' ')}",
+            style["label"],
             (result["cost"], result["accuracy"]),
             textcoords="offset points", xytext=(8, 4),
             fontsize=7, alpha=0.8,
@@ -101,11 +86,11 @@ def plot_1_deferral_curve(df, evaluation):
     ax.plot(curve["cost"], curve["accuracy"], color=COLORS["router"],
             linewidth=2.5, label="Adaptive Router (all models)", zorder=4)
 
-    # Plot cheap router curve
-    curve_cheap = pd.DataFrame(evaluation["router_curve_cheap"])
-    curve_cheap = curve_cheap.sort_values("cost").drop_duplicates(subset="cost", keep="last")
-    ax.plot(curve_cheap["cost"], curve_cheap["accuracy"], color=COLORS["router_cheap"],
-            linewidth=2.5, linestyle="--", label="Adaptive Router (cheap models)", zorder=4)
+    # Plot no-compression ablation curve
+    curve_no_compress = pd.DataFrame(evaluation["no_compress_curve"])
+    curve_no_compress = curve_no_compress.sort_values("cost").drop_duplicates(subset="cost", keep="last")
+    ax.plot(curve_no_compress["cost"], curve_no_compress["accuracy"], color="#E74C3C",
+            linewidth=2.5, linestyle="--", label="UniRoute No Compression (agg=0.0)", zorder=4)
 
     ax.set_xlabel("Average Cost per Request (USD)", fontsize=12)
     ax.set_ylabel("Accuracy (LLM Judge)", fontsize=12)
@@ -239,9 +224,13 @@ def plot_4_routing_heatmap(df):
 
 def plot_5_benchmark_comparison(df):
     """Compare accuracy across benchmarks."""
-    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    benchmarks = df["benchmark"].unique()
+    n_benchmarks = len(benchmarks)
+    fig, axes = plt.subplots(1, n_benchmarks, figsize=(7 * n_benchmarks, 5))
+    if n_benchmarks == 1:
+        axes = [axes]
 
-    for ax, benchmark in zip(axes, df["benchmark"].unique()):
+    for ax, benchmark in zip(axes, benchmarks):
         sub = df[df["benchmark"] == benchmark]
         pivot = sub.pivot_table(values="llm_judge_correct", index="aggressiveness",
                                 columns="model_name", aggfunc="mean")

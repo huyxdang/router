@@ -1,6 +1,6 @@
 # Important Notice
 
-**FinanceBench vs financial-qa-10K:** For clustering and model profiling (training data), we use `virattt/financial-qa-10K` (2,000 samples). For **benchmarking/evaluation only**, we use `PatronusAI/financebench` (150 expert-annotated samples from real SEC filings). FinanceBench is too small (150 total) to use for training, but it is the gold-standard financial QA benchmark. This is because financial-qa has a large quantity of samples, which should provide better clustering. 
+**FinanceBench vs financial-qa-10K:** For clustering and model profiling (training data), we use `virattt/financial-qa-10K` (1,000 samples). For **benchmarking/evaluation only**, we use `PatronusAI/financebench` (150 expert-annotated samples from real SEC filings). FinanceBench is too small (150 total) to use for training, but it is the gold-standard financial QA benchmark. This is because financial-qa has a large quantity of samples, which should provide better clustering.
 
 ---
 
@@ -42,16 +42,14 @@ Standard benchmark-based routing fails here because a model's general intelligen
 
 ### 3.1 Pool Construction
 
-Each base LLM paired with each compression tier forms a distinct "Virtual Model." With 6 base models and 5 compression tiers (0%, 20%, 40%, 60%, 80%), the pool expands to **30 Virtual Models**:
+Each base LLM paired with each compression tier forms a distinct "Virtual Model." With 4 base models and 5 compression tiers (0%, 20%, 40%, 60%, 80%), the pool expands to **20 Virtual Models**:
 
 | Base Model      | 0% | 20% | 40% | 60% | 80% |
 | --------------- | -- | --- | --- | --- | --- |
 | GPT-5.4         | ✓  | ✓   | ✓   | ✓   | ✓   |
-| GPT-4o          | ✓  | ✓   | ✓   | ✓   | ✓   |
-| GPT-4o-mini     | ✓  | ✓   | ✓   | ✓   | ✓   |
-| GPT-4o-nano     | ✓  | ✓   | ✓   | ✓   | ✓   |
 | Claude Sonnet   | ✓  | ✓   | ✓   | ✓   | ✓   |
 | Claude Haiku    | ✓  | ✓   | ✓   | ✓   | ✓   |
+| GPT-4.1-nano    | ✓  | ✓   | ✓   | ✓   | ✓   |
 
 ### 3.2 Model Pool: API-Only, Multi-Tier
 
@@ -61,12 +59,10 @@ All models in the pool are accessed via API. The pool spans three cost tiers acr
 | -------- | ---------------- | --------- | ------------------------------------------------------------------------ |
 | Frontier | GPT-5.4          | OpenAI    | Highest capability ceiling; the "best single model" upper bound          |
 | Frontier | Claude Sonnet    | Anthropic | Cross-provider frontier; tests whether compression tolerance varies by provider |
-| Mid      | GPT-4o           | OpenAI    | Strong general-purpose model at moderate cost                            |
 | Mid      | Claude Haiku     | Anthropic | Fast, cheap Anthropic option; tests small-model compression resilience   |
-| Budget   | GPT-4o-mini      | OpenAI    | Low-cost OpenAI option; high volume routing target                       |
-| Budget   | GPT-4o-nano      | OpenAI    | Cheapest in pool; tests the floor of acceptable compression-degraded output |
+| Budget   | GPT-4.1-nano     | OpenAI    | Cheapest in pool; tests the floor of acceptable compression-degraded output |
 
-**Why this pool?** It covers a ~100x cost range from nano to frontier, includes two providers to test cross-architecture compression tolerance, and every model is API-accessible — no self-hosting required. The 6-model × 5-tier structure produces 30 Virtual Models, which provides a fine-grained routing surface while remaining executable.
+**Why this pool?** It covers a ~30x cost range from nano to frontier, includes two providers to test cross-architecture compression tolerance, and every model is API-accessible — no self-hosting required. The 4-model × 5-tier structure produces 20 Virtual Models, which provides a fine-grained routing surface while remaining executable.
 
 ### 3.3 Dynamic Profiling (Calibration)
 
@@ -104,19 +100,19 @@ This means the router's effective pool can vary dramatically per-user, which is 
 
 ### 5.1 Data Pipeline: One Unified Router
 
-We train a single unified router across all three training domains. Following the UniRoute paper's methodology, we pool all prompts from our 3 training benchmarks (~6,000 total: ~2,000 from each of financial-qa-10K, SQuAD 2.0, and CoQA) and randomly split them:
+We train a single unified router across all three training domains. Following the UniRoute paper's methodology, we pool all prompts from our 3 training benchmarks (~3,000 total: ~1,000 from each of financial-qa-10K, SQuAD 2.0, and CoQA) and randomly split them:
 
 | Split          | % of data | ~Prompts | What it's used for                                        | Needs labels? |
 | -------------- | --------- | -------- | --------------------------------------------------------- | ------------- |
-| **Training**   | 60%       | ~3,600   | K-means clustering (only needs prompt embeddings)          | No            |
-| **Validation** | 10%       | ~600     | Profiling each Virtual Model's per-cluster error ($\Psi$) | Yes           |
-| **Test**       | 30%       | ~1,800   | Final evaluation of routing quality                        | Yes           |
+| **Training**   | 70%       | ~2,100   | K-means clustering (only needs prompt embeddings)          | No            |
+| **Validation** | 10%       | ~300     | Profiling each Virtual Model's per-cluster error ($\Psi$) | Yes           |
+| **Test**       | 20%       | ~600     | Final evaluation of routing quality                        | Yes           |
 
 **Key details:**
 
 - Training prompts are drawn from all 3 training benchmarks (financial-qa-10K, SQuAD 2.0, CoQA), pooled together. This gives the K-means clusters natural structure across financial reasoning, extractive comprehension, and conversational QA domains.
-- Validation prompts ($S_{val}$, ~600) are a separate, non-overlapping split from the same pooled benchmarks. Each Virtual Model is run on these prompts (compressed at the relevant tier) and scored against ground truth to produce its $\Psi$ vector. At ~600 validation prompts and $K_{max}=64$, that's ~9 prompts per cluster minimum — sufficient for stable $\Psi$ vectors.
-- Test prompts (~1,800) are held out entirely and used only for final deferral curve evaluation.
+- Validation prompts ($S_{val}$, ~300) are a separate, non-overlapping split from the same pooled benchmarks. Each Virtual Model is run on these prompts (compressed at the relevant tier) and scored against ground truth to produce its $\Psi$ vector. At ~300 validation prompts and $K_{max}=50$, that's 6 prompts per cluster minimum — sufficient for stable $\Psi$ vectors.
+- Test prompts (~600) are held out entirely and used only for final deferral curve evaluation.
 - Models are **only ever run on $S_{val}$** during the offline phase. They never touch training prompts.
 
 ### 5.2 Baselines
@@ -124,8 +120,8 @@ We train a single unified router across all three training domains. Following th
 | Baseline                        | What It Proves                                                                     |
 | ------------------------------- | ---------------------------------------------------------------------------------- |
 | **GPT-5.4 Only (No Router)**    | The "just use the best model" ceiling. If the router can't beat always-calling GPT-5.4 at lower cost, the architecture has no value. |
-| **OpenRouter (Same Pool)**      | Production routing gateway, **restricted to the same 6 models** as our pool. Apples-to-apples comparison — same models, same prompts, but OpenRouter has no awareness of `bear-1.2` compression. |
-| **UniRoute (No Compression)**   | Our own architecture, but restricting the pool to 0% compression Virtual Models only (6 VMs instead of 30). This isolates the exact value `bear-1.2` adds on top of the routing. |
+| **OpenRouter (Same Pool)**      | Production routing gateway, **restricted to the same 4 models** as our pool. Apples-to-apples comparison — same models, same prompts, but OpenRouter has no awareness of `bear-1.2` compression. |
+| **UniRoute (No Compression)**   | Our own architecture, but restricting the pool to 0% compression Virtual Models only (4 VMs instead of 20). This isolates the exact value `bear-1.2` adds on top of the routing. |
 
 > **Why these?** GPT-5.4 Only is the simplest possible strategy — no routing, no compression, just the best model. If we can't match its quality at lower cost, nothing else matters. OpenRouter is a production routing gateway restricted to the same model pool for a fair head-to-head. The No Compression ablation is the critical control that isolates `bear-1.2`'s contribution from the routing logic itself.
 
@@ -133,17 +129,17 @@ We train a single unified router across all three training domains. Following th
 
 We use the same benchmark families that The Token Company already validates `bear-1.2` against, but scaled up and evaluated across multiple models (where TTC only tested single LLMs). This makes the router directly relevant to their product while testing something they've never done — multi-model routing under compression.
 
-**Training benchmarks** (used for clustering + model profiling, ~6,000 total):
+**Training benchmarks** (used for clustering + model profiling, ~3,000 total):
 
-1. **financial-qa-10K (Financial QA):** ~2,000 questions from SEC 10-K filings. Tests whether models can extract data and reason about dense financial documents under compression. TTC showed compression can *improve* accuracy here — the router should learn to exploit that.
-2. **SQuAD 2.0 (Reading Comprehension):** ~2,000 questions including answerable and unanswerable. Tests extractive comprehension — can the model find the right span, or correctly abstain? TTC showed this is more sensitive to heavy compression than financial QA.
-3. **CoQA (Conversational QA):** ~2,000 multi-turn questions across multiple domains. Tests context tracking across conversation turns under compression. TTC showed light compression preserves multi-turn accuracy perfectly.
+1. **financial-qa-10K (Financial QA):** ~1,000 questions from SEC 10-K filings. Tests whether models can extract data and reason about dense financial documents under compression. TTC showed compression can *improve* accuracy here — the router should learn to exploit that.
+2. **SQuAD 2.0 (Reading Comprehension):** ~1,000 questions including answerable and unanswerable. Tests extractive comprehension — can the model find the right span, or correctly abstain? TTC showed this is more sensitive to heavy compression than financial QA.
+3. **CoQA (Conversational QA):** ~1,000 multi-turn questions across multiple domains. Tests context tracking across conversation turns under compression. TTC showed light compression preserves multi-turn accuracy perfectly.
 
 **Evaluation-only benchmark** (used for final evaluation, not training):
 
 4. **FinanceBench (Patronus AI):** 150 expert-annotated questions over real SEC filings. Gold-standard financial QA benchmark — too small for training but ideal for evaluating financial reasoning quality.
 
-**Total: ~6,000 training prompts + 150 benchmark-only prompts.**
+**Total: ~3,000 training prompts + 150 benchmark-only prompts.**
 
 ### 5.4 Tuning Protocol: The Two Axes
 
@@ -189,6 +185,4 @@ Full grid search: $5 \times 5 = 25$ configurations, evaluated on the unified tes
 
 ## Open Questions
 
-1. **OpenRouter API Access:** Do we have confirmed access to OpenRouter's API? Need to verify that we can restrict it to our exact 6-model pool for a fair comparison.
-
--- OpenRouter API Key is called OPENROUTER_API_KEY 
+(None at this time.)
