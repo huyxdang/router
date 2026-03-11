@@ -37,6 +37,10 @@ MAX_RETRIES = 5
 RETRY_DELAY = 5  # seconds
 RATE_LIMIT_DELAY = 30  # seconds to wait on 429
 
+# Semaphores — initialized in main() to bind to the correct event loop
+_llm_semaphore = None
+_compress_semaphore = None
+
 
 def load_prompts() -> list[dict]:
     """Load val+test prompts only (train prompts don't need LLM calls)."""
@@ -161,37 +165,38 @@ def _get_retry_after(e: Exception) -> float:
 
 
 async def process_one(prompt, agg, comp, model):
-    """Process a single (prompt, agg, model) combo. Returns (combo_key, record) or (combo_key, None) on failure."""
+    """Process a single (prompt, agg, model) combo with semaphore throttling.
+    Returns (combo_key, record) or (combo_key, None) on failure."""
     combo_key = (prompt["id"], agg, model["name"])
     sys_prompt = SYSTEM_PROMPTS.get(prompt["benchmark"], DEFAULT_SYSTEM_PROMPT)
 
-    for attempt in range(MAX_RETRIES + 1):
-        try:
-            llm_result = await call_llm_async(model, comp["compressed_text"], sys_prompt)
-            record = build_record(prompt, agg, comp, model, llm_result)
-            return combo_key, record
-        except Exception as e:
-            if attempt < MAX_RETRIES:
-                if _is_rate_limit(e):
-                    delay = _get_retry_after(e)
-                    print(f"  RATE LIMITED {model['name']} — waiting {delay:.0f}s "
-                          f"(attempt {attempt + 1}/{MAX_RETRIES})")
-                    await asyncio.sleep(delay)
+    async with _llm_semaphore:
+        for attempt in range(MAX_RETRIES + 1):
+            try:
+                llm_result = await call_llm_async(model, comp["compressed_text"], sys_prompt)
+                record = build_record(prompt, agg, comp, model, llm_result)
+                return combo_key, record
+            except Exception as e:
+                if attempt < MAX_RETRIES:
+                    if _is_rate_limit(e):
+                        delay = _get_retry_after(e)
+                        print(f"  RATE LIMITED {model['name']} — waiting {delay:.0f}s "
+                              f"(attempt {attempt + 1}/{MAX_RETRIES})")
+                        await asyncio.sleep(delay)
+                    else:
+                        print(f"  RETRY {attempt + 1}/{MAX_RETRIES} "
+                              f"{prompt['id']} / {model['name']} / agg={agg}: {e}")
+                        await asyncio.sleep(RETRY_DELAY * (2 ** attempt))
                 else:
-                    print(f"  RETRY {attempt + 1}/{MAX_RETRIES} "
-                          f"{prompt['id']} / {model['name']} / agg={agg}: {e}")
-                    await asyncio.sleep(RETRY_DELAY * (2 ** attempt))
-            else:
-                print(f"  FAILED {prompt['id']} / {model['name']} / agg={agg}: {e}")
-                return combo_key, None
-
-
-async def run_batch(tasks):
-    """Run a batch of tasks concurrently."""
-    return await asyncio.gather(*tasks)
+                    print(f"  FAILED {prompt['id']} / {model['name']} / agg={agg}: {e}")
+                    return combo_key, None
 
 
 async def main():
+    global _llm_semaphore, _compress_semaphore
+    _llm_semaphore = asyncio.Semaphore(BATCH_SIZE)
+    _compress_semaphore = asyncio.Semaphore(10)
+
     os.makedirs(RESULTS_DIR, exist_ok=True)
 
     print("=" * 80)
@@ -219,10 +224,9 @@ async def main():
         return
     print(f"  Remaining: {remaining} / {total_combos}")
 
-    # Phase 1: Compress all prompts (async, 3 concurrent to avoid 429)
-    COMPRESS_BATCH = 3
+    # Phase 1: Compress all prompts (async, semaphore-throttled)
     print("\n" + "-" * 80)
-    print(f"PHASE 1: Compression (async, batch_size={COMPRESS_BATCH})")
+    print(f"PHASE 1: Compression (async, concurrency={_compress_semaphore._value})")
     print("-" * 80)
 
     compress_total = len(prompts) * len(AGGRESSIVENESS_LEVELS)
@@ -240,43 +244,41 @@ async def main():
     print(f"  Pending: {len(pending_compress)} compressions")
 
     async def _compress_one(prompt, agg, cache_key):
-        for attempt in range(MAX_RETRIES + 1):
-            try:
-                result = await compress_async(prompt["text"], agg)
-                return cache_key, result, None
-            except Exception as e:
-                if "429" in str(e) and attempt < MAX_RETRIES:
-                    await asyncio.sleep(RATE_LIMIT_DELAY * (attempt + 1))
-                elif attempt < MAX_RETRIES:
-                    await asyncio.sleep(RETRY_DELAY * (2 ** attempt))
-                else:
-                    return cache_key, None, (prompt, agg, str(e))
+        async with _compress_semaphore:
+            for attempt in range(MAX_RETRIES + 1):
+                try:
+                    result = await compress_async(prompt["text"], agg)
+                    return cache_key, result, None
+                except Exception as e:
+                    if "429" in str(e) and attempt < MAX_RETRIES:
+                        await asyncio.sleep(RATE_LIMIT_DELAY * (attempt + 1))
+                    elif attempt < MAX_RETRIES:
+                        await asyncio.sleep(RETRY_DELAY * (2 ** attempt))
+                    else:
+                        return cache_key, None, (prompt, agg, str(e))
 
     compress_failures = []
-    for batch_start in range(0, len(pending_compress), COMPRESS_BATCH):
-        batch = pending_compress[batch_start:batch_start + COMPRESS_BATCH]
-        tasks = [_compress_one(p, a, k) for p, a, k in batch]
-        results = await asyncio.gather(*tasks)
+    tasks = [_compress_one(p, a, k) for p, a, k in pending_compress]
+    results = await asyncio.gather(*tasks)
 
-        for cache_key, result, error in results:
-            if result is not None:
-                compress_cache[cache_key] = {
-                    "compressed_text": result["compressed_text"],
-                    "original_input_tokens": result["original_input_tokens"],
-                    "output_tokens": result["output_tokens"],
-                    "compression_ratio": result["compression_ratio"],
-                    "tokens_removed": result["tokens_removed"],
-                    "removal_rate": result["removal_rate"],
-                }
-                compress_done += 1
-            else:
-                prompt, agg, err_msg = error
-                print(f"  ERROR {prompt['id']} @ agg={agg}: {err_msg}")
-                compress_failures.append((prompt, agg))
+    for cache_key, result, error in results:
+        if result is not None:
+            compress_cache[cache_key] = {
+                "compressed_text": result["compressed_text"],
+                "original_input_tokens": result["original_input_tokens"],
+                "output_tokens": result["output_tokens"],
+                "compression_ratio": result["compression_ratio"],
+                "tokens_removed": result["tokens_removed"],
+                "removal_rate": result["removal_rate"],
+            }
+            compress_done += 1
+        else:
+            prompt, agg, err_msg = error
+            print(f"  ERROR {prompt['id']} @ agg={agg}: {err_msg}")
+            compress_failures.append((prompt, agg))
 
-        if compress_done % 50 == 0 or batch_start + COMPRESS_BATCH >= len(pending_compress):
-            save_compress_cache(compress_cache)
-            print(f"  Compressed {compress_done}/{compress_total}")
+    save_compress_cache(compress_cache)
+    print(f"  Compressed {compress_done}/{compress_total}")
 
     # Retry failed compressions (sequential — these already failed once)
     if compress_failures:
@@ -335,35 +337,43 @@ async def main():
     failed = []  # collect failures for retry pass
     since_checkpoint = 0
 
-    # Process in batches
-    for batch_start in range(0, len(pending), BATCH_SIZE):
-        batch = pending[batch_start:batch_start + BATCH_SIZE]
-        tasks = [process_one(p, a, c, m) for p, a, c, m in batch]
-        results = await run_batch(tasks)
+    # Build lookup for retry tracking
+    pending_lookup = {(p["id"], a, m["name"]): (p, a, c, m) for p, a, c, m in pending}
+    n_pending = len(pending)
 
-        for combo_key, record in results:
-            if record is not None:
-                records.append(record)
-                completed.add(combo_key)
-                calls_made += 1
-                since_checkpoint += 1
-            else:
-                errors += 1
-                # Find the original args for retry
-                for p, a, c, m in batch:
-                    if (p["id"], a, m["name"]) == combo_key:
-                        failed.append((p, a, c, m))
-                        break
+    # Wrapper that tracks progress as each task completes
+    async def _tracked(p, a, c, m):
+        nonlocal calls_made, errors, since_checkpoint
+        combo_key, record = await process_one(p, a, c, m)
+        if record is not None:
+            records.append(record)
+            completed.add(combo_key)
+            calls_made += 1
+            since_checkpoint += 1
+        else:
+            errors += 1
+            if combo_key in pending_lookup:
+                failed.append(pending_lookup[combo_key])
 
-        # Checkpoint periodically
+        # Progress + checkpoint
         if since_checkpoint >= CHECKPOINT_EVERY:
             save_checkpoint(records)
             since_checkpoint = 0
-            done = len(completed)
-            print(f"  Progress: {done}/{total_combos} "
-                  f"({done/total_combos:.1%}) | "
-                  f"+{calls_made} calls | "
-                  f"{errors} errors")
+            done = calls_made + errors
+            total_pct = len(completed) / total_combos * 100
+            print(f"  [{done}/{n_pending}] +{calls_made} ok / {errors} err "
+                  f"({len(completed)}/{total_combos} — {total_pct:.1f}% overall)", flush=True)
+
+    # Fire all tasks — semaphore in process_one throttles concurrency
+    tasks = [_tracked(p, a, c, m) for p, a, c, m in pending]
+    await asyncio.gather(*tasks)
+
+    save_checkpoint(records)
+    done = len(completed)
+    print(f"  Progress: {done}/{total_combos} "
+          f"({done/total_combos:.1%}) | "
+          f"+{calls_made} calls | "
+          f"{errors} errors")
 
     # Phase 3: Retry failed combos
     if failed:

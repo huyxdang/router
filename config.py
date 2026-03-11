@@ -113,7 +113,7 @@ EMBEDDING_MODEL = "text-embedding-3-small" # by OpenAI
 K_VALUES = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50]
 
 # ============ Grid Search ============
-BATCH_SIZE = 10  # concurrent LLM calls
+BATCH_SIZE = 25  # concurrent LLM calls (semaphore-based)
 CHECKPOINT_EVERY = 50
 
 # ============ LLM Judge ============
