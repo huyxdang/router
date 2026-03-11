@@ -31,7 +31,13 @@ def compute_cost(model_config: dict, input_tokens: int, output_tokens: int,
 
 def parse_judge_verdict(text: str) -> str:
     """Parse a judge response into 'correct' or 'incorrect'."""
-    text = text.strip().lower()
-    if "correct" in text and "incorrect" not in text:
+    text = " ".join(text.strip().lower().split())
+    if text == "correct":
+        return "correct"
+    if text == "incorrect":
+        return "incorrect"
+    if "incorrect" in text or "not correct" in text:
+        return "incorrect"
+    if "correct" in text:
         return "correct"
     return "incorrect"

@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from config import (
     MODELS, RESULTS_DIR, BENCHMARKS, DATA_DIR, OPENAI_API_KEY, JUDGE_MODEL,
     EVAL_BENCHMARKS, SYSTEM_PROMPTS, DEFAULT_SYSTEM_PROMPT,
-    AGGRESSIVENESS_LEVELS, BATCH_SIZE, get_model_by_name,
+    AGGRESSIVENESS_LEVELS, BATCH_SIZE, get_model_by_name, OPENROUTER_MODEL_IDS,
 )
 from router.data import load_prompts, load_ground_truths
 from router.clustering import compute_cluster_stats_minimal
@@ -56,13 +56,18 @@ def evaluate_fixed_strategy(df_test: pd.DataFrame, model_name: str,
 async def evaluate_openrouter_baseline(df_test: pd.DataFrame) -> dict:
     """Evaluate OpenRouter auto-router on test prompts (no compression).
 
-    Sends each test prompt to OpenRouter restricted to our 6-model pool.
+    Sends each test prompt to OpenRouter restricted to our model pool.
     Returns accuracy and cost. Requires live API calls.
     """
     import openai as oai
     from router.llm import call_openrouter_async
 
     allowed_model_ids = [m["id"] for m in MODELS]
+    or_to_model_config = {
+        OPENROUTER_MODEL_IDS[m["id"]]: m
+        for m in MODELS
+        if m["id"] in OPENROUTER_MODEL_IDS
+    }
 
     prompt_lookup = {p["id"]: p["text"] for p in load_prompts()}
     ground_truths = load_ground_truths()
@@ -124,14 +129,25 @@ async def evaluate_openrouter_baseline(df_test: pd.DataFrame) -> dict:
 
     correct = sum(verdicts)
     total = len(or_results)
-    total_cost = sum(
-        (r["input_tokens"] + r["output_tokens"]) * 1.0 / 1_000_000
-        for r in or_results
-    )
+    total_cost = 0.0
+    unknown_model_count = 0
+    for r in or_results:
+        model_used = (r.get("model_used") or "").split(":")[0]
+        model_config = or_to_model_config.get(model_used)
+        if model_config is None:
+            unknown_model_count += 1
+            continue
+        cost = compute_cost(model_config, r["input_tokens"], r["output_tokens"], tokens_removed=0)
+        total_cost += cost["total_cost_usd"]
+
+    cost_count = total - unknown_model_count
+    mean_cost = total_cost / cost_count if cost_count else 0.0
+    if unknown_model_count:
+        print(f"    WARNING: {unknown_model_count}/{total} OpenRouter responses had unknown model IDs; cost excludes them.")
 
     return {
         "accuracy": correct / total if total else 0.0,
-        "cost": total_cost / total if total else 0.0,
+        "cost": mean_cost,
         "count": total,
     }
 

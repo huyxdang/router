@@ -58,7 +58,26 @@ def main():
 
     # Step 1: Load grid results
     print("\n[1] Loading grid results...")
+    if not os.path.exists(GRID_RESULTS_PATH):
+        raw_path = os.path.join(str(RESULTS_DIR), "grid_results.parquet")
+        msg = [
+            f"Missing required file: {GRID_RESULTS_PATH}",
+            "03_build_router.py expects judged results (column: llm_judge).",
+        ]
+        if os.path.exists(raw_path):
+            msg.append(f"Found raw grid results at: {raw_path}")
+            msg.append("Next step: run judge batch before building router:")
+            msg.append("  python3 scripts/03_llm_judge_batch.py submit")
+            msg.append("  python3 scripts/03_llm_judge_batch.py status")
+            msg.append("  python3 scripts/03_llm_judge_batch.py download")
+        raise SystemExit("\n".join(msg))
+
     df = pd.read_parquet(GRID_RESULTS_PATH)
+    if "llm_judge" not in df.columns:
+        raise SystemExit(
+            f"{GRID_RESULTS_PATH} is missing column 'llm_judge'. "
+            "Re-run: python3 scripts/03_llm_judge_batch.py download"
+        )
     df["llm_judge_correct"] = (df["llm_judge"] == "correct").astype(float)
     print(f"  {len(df)} records")
 

@@ -6,12 +6,11 @@ import json
 import os
 import sys
 
-import matplotlib.pyplot as plt
 import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-
-matplotlib.use("Agg")
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 

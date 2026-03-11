@@ -73,6 +73,10 @@ Uses TTC's **bear-1.2** compression API to reduce input tokens before routing to
 ## Quick Start
 
 ```bash
+# Create and activate isolated env (recommended)
+python -m venv .venv
+source .venv/bin/activate
+
 # Install dependencies
 pip install -r requirements.txt
 
@@ -85,9 +89,11 @@ python scripts/00_check_apis.py               # Verify all API endpoints
 python scripts/01_prepare_data.py             # Download datasets from HuggingFace
 python scripts/01_validate.py                 # Smoke test (1 prompt per benchmark)
 python scripts/02_grid_search.py              # Async compression + LLM calls (val+test)
-python scripts/06_llm_judge_batch.py submit   # Submit judge jobs via OpenAI Batch API
-python scripts/06_llm_judge_batch.py status   # Check batch status
-python scripts/06_llm_judge_batch.py download # Download judge verdicts
+python scripts/03_llm_judge_batch.py submit   # Submit judge jobs via OpenAI Batch API
+python scripts/03_llm_judge_batch.py status   # Check batch status
+python scripts/03_llm_judge_batch.py download # Download judge verdicts
+# Or automate all chunks end-to-end:
+python scripts/03_llm_judge_batch.py run 800 30  # chunk=800, poll every 30s
 python scripts/03_build_router.py             # Embed, cluster, build routing table
 python scripts/08_tune_and_cv.py              # K-tuning via cross-validation
 python scripts/04_evaluate.py                 # Deferral curves, AUC, QNC, FinanceBench
@@ -102,7 +108,7 @@ python scripts/05_visualize.py                # Generate plots
 | 1a | `01_prepare_data.py` | Download SQuAD 2.0, financial-qa-10K, CoQA, and FinanceBench; format as JSON |
 | 1b | `01_validate.py` | Smoke test: 1 prompt per benchmark through compress + LLM |
 | 2 | `02_grid_search.py` | Run all (prompt, compression, model) combos on val+test split; auto-resume with checkpoints |
-| 3 | `06_llm_judge_batch.py` | Judge answers via OpenAI Batch API (gpt-4o-mini); submit / status / download subcommands |
+| 3 | `03_llm_judge_batch.py` | Judge answers via OpenAI Batch API (gpt-4o-mini); submit / status / download subcommands |
 | 4 | `03_build_router.py` | Embed prompts with text-embedding-3-small, K-means clustering, compute cluster stats |
 | 5 | `08_tune_and_cv.py` | Tune K (number of clusters) via cross-validation |
 | 6 | `04_evaluate.py` | Deferral curves, AUC, QNC metrics; FinanceBench held-out evaluation |
@@ -133,6 +139,7 @@ router/
 │   ├── 01_validate.py                  # Smoke test
 │   ├── 02_grid_search.py              # Grid search with auto-resume + rate limiting
 │   ├── 03_build_router.py             # Embed, K-means, cluster stats
+│   ├── 03_llm_judge_batch.py          # Preferred alias for LLM-as-judge batch step
 │   ├── 04_evaluate.py                 # Deferral curves, AUC, QNC, FinanceBench
 │   ├── 05_visualize.py                # Generate all plots
 │   ├── 06_llm_judge_batch.py          # LLM-as-judge via OpenAI Batch API

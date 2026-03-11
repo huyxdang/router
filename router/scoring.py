@@ -105,7 +105,11 @@ def compute_auc(curve: pd.DataFrame) -> float:
     curve = curve.drop_duplicates(subset="cost", keep="last")
     if len(curve) < 2:
         return 0.0
-    return float(np.trapezoid(curve["accuracy"], curve["cost"]))
+    if hasattr(np, "trapezoid"):
+        area = np.trapezoid(curve["accuracy"], curve["cost"])
+    else:
+        area = np.trapz(curve["accuracy"], curve["cost"])
+    return float(area)
 
 
 def compute_qnc(curve: pd.DataFrame, target_accuracy: float) -> float | None:
