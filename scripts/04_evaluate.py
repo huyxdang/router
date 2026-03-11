@@ -11,13 +11,21 @@ import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from config import MODELS, RESULTS_DIR, BENCHMARKS, DATA_DIR, OPENAI_API_KEY, JUDGE_MODEL
+from config import (
+    MODELS, RESULTS_DIR, BENCHMARKS, DATA_DIR, OPENAI_API_KEY, JUDGE_MODEL,
+    EVAL_BENCHMARKS, SYSTEM_PROMPTS, DEFAULT_SYSTEM_PROMPT,
+    AGGRESSIVENESS_LEVELS, get_model_by_name,
+)
 from router.data import load_prompts, load_ground_truths
 from router.clustering import compute_cluster_stats_minimal
 from router.scoring import (
     evaluate_router, compute_deferral_curve, compute_auc, compute_qnc,
+    score_candidates,
 )
-from router.evaluate import JUDGE_PROMPT, parse_judge_verdict
+from router.evaluate import JUDGE_PROMPT, parse_judge_verdict, compute_cost
+from router.embeddings import embed_and_cache
+from router.compress import compress
+from router.llm import call_llm
 
 SPLITS_PATH = os.path.join(str(RESULTS_DIR), "router_splits.json")
 GRID_PATH = os.path.join(str(RESULTS_DIR), "grid_results_clustered.parquet")
@@ -115,6 +123,112 @@ def evaluate_openrouter_baseline(df_test: pd.DataFrame) -> dict:
         "cost": total_cost / total if total else 0.0,
         "count": total,
     }
+
+
+def evaluate_financebench(cluster_stats, kmeans, lambda_values=[0, 1, 10, 100]):
+    """Run the router live on FinanceBench (out-of-domain eval).
+
+    Since FinanceBench isn't in the grid search, we do live inference:
+    embed → cluster → pick (model, agg) → compress → call LLM → judge.
+    """
+    import openai as oai
+    from sklearn.cluster import KMeans as _KMeans
+
+    # Load FinanceBench prompts
+    fb_prompts = []
+    for bench in EVAL_BENCHMARKS:
+        path = os.path.join(str(DATA_DIR), f"{bench}_subset.json")
+        if not os.path.exists(path):
+            print(f"    {path} not found, skipping")
+            continue
+        with open(path) as f:
+            fb_prompts.extend(json.load(f))
+
+    if not fb_prompts:
+        return {}
+
+    print(f"    Loaded {len(fb_prompts)} FinanceBench prompts")
+
+    # Embed and assign clusters
+    fb_ids = [p["id"] for p in fb_prompts]
+    fb_texts = [p["text"] for p in fb_prompts]
+    fb_embeddings = embed_and_cache(fb_ids, fb_texts)
+    fb_clusters = kmeans.predict(fb_embeddings)
+
+    judge_client = oai.OpenAI(api_key=OPENAI_API_KEY)
+    results_by_lambda = {}
+
+    for lam in lambda_values:
+        correct = 0
+        total = 0
+        total_cost = 0.0
+
+        for i, prompt in enumerate(fb_prompts):
+            cluster_id = int(fb_clusters[i])
+
+            # Get candidates for this cluster
+            candidates = cluster_stats[
+                cluster_stats["cluster_id"] == cluster_id
+            ].copy()
+
+            if len(candidates) == 0:
+                continue
+
+            best = score_candidates(candidates, lam)
+            chosen_model_name = best["model_name"]
+            chosen_agg = float(best["aggressiveness"])
+
+            # Compress
+            try:
+                comp = compress(prompt["text"], chosen_agg)
+            except Exception as e:
+                print(f"    Compress error {prompt['id']}: {e}")
+                continue
+
+            # Call LLM
+            model_config = get_model_by_name(chosen_model_name)
+            sys_prompt = SYSTEM_PROMPTS.get(prompt["benchmark"], DEFAULT_SYSTEM_PROMPT)
+            try:
+                llm_result = call_llm(model_config, comp["compressed_text"], sys_prompt)
+            except Exception as e:
+                print(f"    LLM error {prompt['id']}: {e}")
+                continue
+
+            # Judge
+            try:
+                judge_resp = judge_client.chat.completions.create(
+                    model=JUDGE_MODEL,
+                    messages=[{"role": "user", "content": JUDGE_PROMPT.format(
+                        ground_truth=prompt["ground_truth"],
+                        response=llm_result["response_text"],
+                    )}],
+                    max_tokens=10,
+                    temperature=0,
+                )
+                verdict = parse_judge_verdict(judge_resp.choices[0].message.content)
+                if verdict == "correct":
+                    correct += 1
+            except Exception as e:
+                print(f"    Judge error: {e}")
+
+            cost_info = compute_cost(
+                model_config,
+                llm_result["input_tokens"],
+                llm_result["output_tokens"],
+                comp["tokens_removed"],
+            )
+            total_cost += cost_info["total_cost_usd"]
+            total += 1
+
+        results_by_lambda[lam] = {
+            "accuracy": correct / total if total else 0.0,
+            "cost": total_cost / total if total else 0.0,
+            "count": total,
+        }
+        print(f"    lambda={lam}: acc={results_by_lambda[lam]['accuracy']:.3f}  "
+              f"cost=${results_by_lambda[lam]['cost']:.6f}  n={total}")
+
+    return results_by_lambda
 
 
 def main():
@@ -217,6 +331,20 @@ def main():
             if r["count"] > 0:
                 print(f"  {'router lambda=' + str(lam):<20s} acc={r['accuracy']:.3f}  cost=${r['cost']:.6f}")
 
+    # ===== OUT-OF-DOMAIN: FinanceBench (live inference) =====
+    print("\n[6c] FinanceBench out-of-domain evaluation (live)...")
+
+    # Load KMeans centroids for cluster assignment
+    centroids_path = os.path.join(str(RESULTS_DIR), "centroids.npy")
+    centroids = np.load(centroids_path)
+    from sklearn.cluster import KMeans
+    n_clusters = len(centroids)
+    kmeans = KMeans(n_clusters=n_clusters)
+    kmeans.cluster_centers_ = centroids
+    kmeans._n_threads = 1
+
+    fb_results = evaluate_financebench(cluster_stats, kmeans)
+
     # Save results
     print("\n[7] Saving evaluation results...")
     eval_results = {
@@ -229,6 +357,7 @@ def main():
         "auc_router": auc_router,
         "auc_no_compress": auc_no_compress,
         "qnc": qnc,
+        "financebench": fb_results,
     }
 
     eval_path = os.path.join(str(RESULTS_DIR), "evaluation.json")

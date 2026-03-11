@@ -2,6 +2,15 @@ import httpx
 
 from config import TTC_API_KEY, BEAR_API_URL, BEAR_MODEL
 
+_async_client = None
+
+
+def _get_async_client():
+    global _async_client
+    if _async_client is None:
+        _async_client = httpx.AsyncClient(timeout=60.0)
+    return _async_client
+
 
 def compress(text: str, aggressiveness: float) -> dict:
     """Compress text using the TTC bear API.
@@ -34,7 +43,7 @@ def compress(text: str, aggressiveness: float) -> dict:
                 "aggressiveness": aggressiveness,
             },
         },
-        timeout=30.0,
+        timeout=60.0,
     )
     response.raise_for_status()
     data = response.json()
@@ -51,3 +60,49 @@ def compress(text: str, aggressiveness: float) -> dict:
         "tokens_removed": tokens_removed,
         "removal_rate": tokens_removed / original_tokens if original_tokens > 0 else 0.0,
     }
+
+
+def _parse_response(data: dict) -> dict:
+    """Parse Bear API response into standard format."""
+    original_tokens = data["original_input_tokens"]
+    output_tokens = data["output_tokens"]
+    tokens_removed = original_tokens - output_tokens
+    return {
+        "compressed_text": data["output"],
+        "original_input_tokens": original_tokens,
+        "output_tokens": output_tokens,
+        "compression_ratio": output_tokens / original_tokens if original_tokens > 0 else 1.0,
+        "tokens_removed": tokens_removed,
+        "removal_rate": tokens_removed / original_tokens if original_tokens > 0 else 0.0,
+    }
+
+
+async def compress_async(text: str, aggressiveness: float) -> dict:
+    """Async version of compress."""
+    if aggressiveness == 0.0:
+        return {
+            "compressed_text": text,
+            "original_input_tokens": 0,
+            "output_tokens": 0,
+            "compression_ratio": 1.0,
+            "tokens_removed": 0,
+            "removal_rate": 0.0,
+        }
+
+    client = _get_async_client()
+    response = await client.post(
+        BEAR_API_URL,
+        headers={
+            "Authorization": f"Bearer {TTC_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": BEAR_MODEL,
+            "input": text,
+            "compression_settings": {
+                "aggressiveness": aggressiveness,
+            },
+        },
+    )
+    response.raise_for_status()
+    return _parse_response(response.json())

@@ -16,12 +16,15 @@ import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+import numpy as np
+
 from config import (
     MODELS, AGGRESSIVENESS_LEVELS, BENCHMARKS,
     DATA_DIR, RESULTS_DIR, BATCH_SIZE, CHECKPOINT_EVERY,
     SYSTEM_PROMPTS, DEFAULT_SYSTEM_PROMPT,
+    TRAIN_FRACTION, VAL_FRACTION, RANDOM_SEED,
 )
-from router.compress import compress
+from router.compress import compress, compress_async
 from router.llm import call_llm_async
 from router.evaluate import compute_cost
 
@@ -36,9 +39,23 @@ RATE_LIMIT_DELAY = 30  # seconds to wait on 429
 
 
 def load_prompts() -> list[dict]:
-    """Load all benchmark prompts."""
+    """Load val+test prompts only (train prompts don't need LLM calls)."""
     from router.data import load_prompts as _load
-    return _load()
+    all_prompts = _load()
+
+    # Same split logic as 03_build_router.py — deterministic by seed
+    prompt_ids = [p["id"] for p in all_prompts]
+    rng = np.random.RandomState(RANDOM_SEED)
+    ids = prompt_ids.copy()
+    rng.shuffle(ids)
+
+    n_train = int(len(ids) * TRAIN_FRACTION)
+    val_test_ids = set(ids[n_train:])  # everything after train
+
+    prompts = [p for p in all_prompts if p["id"] in val_test_ids]
+    print(f"  Filtered to val+test: {len(prompts)} / {len(all_prompts)} prompts "
+          f"(skipping {len(all_prompts) - len(prompts)} train prompts)")
+    return prompts
 
 
 def load_existing_results() -> tuple[list[dict], set]:
@@ -202,24 +219,47 @@ async def main():
         return
     print(f"  Remaining: {remaining} / {total_combos}")
 
-    # Phase 1: Compress all prompts (sequential — bear API)
+    # Phase 1: Compress all prompts (async, 3 concurrent to avoid 429)
+    COMPRESS_BATCH = 3
     print("\n" + "-" * 80)
-    print("PHASE 1: Compression")
+    print(f"PHASE 1: Compression (async, batch_size={COMPRESS_BATCH})")
     print("-" * 80)
 
     compress_total = len(prompts) * len(AGGRESSIVENESS_LEVELS)
     compress_done = len(compress_cache)
     print(f"  {compress_done}/{compress_total} already cached")
 
-    compress_failures = []
-    for i, prompt in enumerate(prompts):
+    # Build list of pending compressions
+    pending_compress = []
+    for prompt in prompts:
         for agg in AGGRESSIVENESS_LEVELS:
             cache_key = f"{prompt['id']}_agg{agg}"
-            if cache_key in compress_cache:
-                continue
+            if cache_key not in compress_cache:
+                pending_compress.append((prompt, agg, cache_key))
 
+    print(f"  Pending: {len(pending_compress)} compressions")
+
+    async def _compress_one(prompt, agg, cache_key):
+        for attempt in range(MAX_RETRIES + 1):
             try:
-                result = compress(prompt["text"], agg)
+                result = await compress_async(prompt["text"], agg)
+                return cache_key, result, None
+            except Exception as e:
+                if "429" in str(e) and attempt < MAX_RETRIES:
+                    await asyncio.sleep(RATE_LIMIT_DELAY * (attempt + 1))
+                elif attempt < MAX_RETRIES:
+                    await asyncio.sleep(RETRY_DELAY * (2 ** attempt))
+                else:
+                    return cache_key, None, (prompt, agg, str(e))
+
+    compress_failures = []
+    for batch_start in range(0, len(pending_compress), COMPRESS_BATCH):
+        batch = pending_compress[batch_start:batch_start + COMPRESS_BATCH]
+        tasks = [_compress_one(p, a, k) for p, a, k in batch]
+        results = await asyncio.gather(*tasks)
+
+        for cache_key, result, error in results:
+            if result is not None:
                 compress_cache[cache_key] = {
                     "compressed_text": result["compressed_text"],
                     "original_input_tokens": result["original_input_tokens"],
@@ -229,17 +269,16 @@ async def main():
                     "removal_rate": result["removal_rate"],
                 }
                 compress_done += 1
-            except Exception as e:
-                print(f"  ERROR compressing {prompt['id']} @ agg={agg}: {e}")
+            else:
+                prompt, agg, err_msg = error
+                print(f"  ERROR {prompt['id']} @ agg={agg}: {err_msg}")
                 compress_failures.append((prompt, agg))
-                continue
 
-        if (i + 1) % 10 == 0:
+        if compress_done % 50 == 0 or batch_start + COMPRESS_BATCH >= len(pending_compress):
             save_compress_cache(compress_cache)
-            print(f"  Compressed {compress_done}/{compress_total} "
-                  f"(prompt {i + 1}/{len(prompts)})")
+            print(f"  Compressed {compress_done}/{compress_total}")
 
-    # Retry failed compressions
+    # Retry failed compressions (sequential — these already failed once)
     if compress_failures:
         print(f"  Retrying {len(compress_failures)} failed compressions...")
         still_failed = 0

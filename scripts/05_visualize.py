@@ -24,23 +24,19 @@ GRID_PATH = os.path.join(str(RESULTS_DIR), "grid_results_clustered.parquet")
 EVAL_PATH = os.path.join(str(RESULTS_DIR), "evaluation.json")
 
 COLORS = {
+    "gpt-4.1-nano": "#1ABC9C",
     "claude-haiku": "#E07B4B",
     "claude-sonnet": "#D4A054",
-    "gpt-4o-mini": "#4B9FE0",
     "gpt-5.4": "#9B59B6",
-    "gpt-4.1-nano": "#1ABC9C",
-    "gpt-4.1": "#3498DB",
     "router": "#2ECC71",
     "router_cheap": "#27AE60",
 }
 
 MODEL_MARKERS = {
+    "gpt-4.1-nano": "v",
     "claude-haiku": "s",
     "claude-sonnet": "D",
-    "gpt-4o-mini": "o",
     "gpt-5.4": "^",
-    "gpt-4.1-nano": "v",
-    "gpt-4.1": "P",
 }
 
 

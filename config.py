@@ -24,6 +24,13 @@ BEAR_COST_PER_1M_TOKENS_REMOVED = 0.05  # USD
 # ============ Models ============
 MODELS = [
     {
+        "name": "gpt-4.1-nano",
+        "id": "gpt-4.1-nano",
+        "provider": "openai",
+        "cost_per_1m_input": 0.10,
+        "cost_per_1m_output": 0.40,
+    },
+    {
         "name": "claude-haiku",
         "id": "claude-haiku-4-5-20251001",
         "provider": "anthropic",
@@ -38,32 +45,11 @@ MODELS = [
         "cost_per_1m_output": 15.00,
     },
     {
-        "name": "gpt-4o-mini",
-        "id": "gpt-4o-mini",
-        "provider": "openai",
-        "cost_per_1m_input": 0.15,
-        "cost_per_1m_output": 0.60,
-    },
-    {
         "name": "gpt-5.4",
         "id": "gpt-5.4",
         "provider": "openai",
         "cost_per_1m_input": 2.50,
         "cost_per_1m_output": 15.00,
-    },
-    {
-        "name": "gpt-4.1-nano",
-        "id": "gpt-4.1-nano",
-        "provider": "openai",
-        "cost_per_1m_input": 0.10,
-        "cost_per_1m_output": 0.40,
-    },
-    {
-        "name": "gpt-4.1",
-        "id": "gpt-4.1",
-        "provider": "openai",
-        "cost_per_1m_input": 2.00,
-        "cost_per_1m_output": 8.00,
     },
 ]
 
@@ -71,12 +57,10 @@ MODELS = [
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 # Mapping from our model IDs to OpenRouter model IDs
 OPENROUTER_MODEL_IDS = {
+    "gpt-4.1-nano": "openai/gpt-4.1-nano",
     "claude-haiku-4-5-20251001": "anthropic/claude-haiku-4.5",
     "claude-sonnet-4-6": "anthropic/claude-sonnet-4.6",
-    "gpt-4o-mini": "openai/gpt-4o-mini",
     "gpt-5.4": "openai/gpt-5.4",
-    "gpt-4.1-nano": "openai/gpt-4.1-nano",
-    "gpt-4.1": "openai/gpt-4.1",
 }
 
 # ============ LLM Settings ============
@@ -113,15 +97,15 @@ AGGRESSIVENESS_LEVELS = [0.0, 0.2, 0.4, 0.6, 0.8]
 # ============ Benchmarks & Data ============
 # Training benchmarks: used for clustering, model profiling, grid search
 BENCHMARKS = ["squad2", "finqa", "coqa"]
-PROMPTS_PER_BENCHMARK = 2000
+PROMPTS_PER_BENCHMARK = 1000
 
 # Eval-only benchmarks: used for final evaluation, not training
 EVAL_BENCHMARKS = ["financebench"]
 
 # Data splits (train / val / test)
-TRAIN_FRACTION = 0.60
+TRAIN_FRACTION = 0.70
 VAL_FRACTION = 0.10
-TEST_FRACTION = 0.30
+TEST_FRACTION = 0.20
 RANDOM_SEED = 42
 
 # ============ Clustering ============

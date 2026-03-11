@@ -1,5 +1,7 @@
 """Adaptive compression router: embed -> cluster -> route to optimal (model, agg)."""
 
+from __future__ import annotations
+
 import json
 import os
 
